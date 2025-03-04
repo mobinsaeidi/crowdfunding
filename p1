@@ -1,0 +1,91 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.25;
+
+contract Crowdfunding {
+    // Address of the campaign creator
+    address public creator;
+    
+    // Campaign goal amount (in wei)
+    uint256 public goal;
+    
+    // Total amount raised
+    uint256 public totalRaised;
+    
+    // Campaign deadline (timestamp)
+    uint256 public deadline;
+    
+    // Mapping to track each contributor's donations
+    mapping(address => uint256) public contributions;
+    
+    // List of contributor addresses
+    address[] public contributors;
+    
+    // Campaign status (whether funding is complete)
+    bool public fundingComplete;
+    
+    // Flag to check if refunds have been issued
+    bool public refunded;
+
+    // Contract events
+    event CampaignCreated(address creator, uint256 goal, uint256 deadline);
+    event ContributionReceived(address contributor, uint256 amount);
+    event FundsWithdrawn(address creator, uint256 amount);
+    event RefundIssued(address contributor, uint256 amount);
+
+    // Contract constructor: sets campaign goal and duration
+    constructor(uint256 _goal, uint256 _duration) {
+        require(_goal > 0, "Goal must be greater than 0"); // Ensure goal is greater than zero
+        require(_duration > 0, "Duration must be greater than 0"); // Ensure valid duration
+        creator = msg.sender; // Assign campaign creator
+        goal = _goal; // Set campaign goal
+        deadline = block.timestamp + _duration; // Set campaign deadline
+        emit CampaignCreated(creator, goal, deadline); // Emit event for campaign creation
+    }
+
+    // Function to contribute to the campaign
+    function contribute() public payable {
+        require(!fundingComplete, "Campaign is already complete"); // Ensure campaign is not already completed
+        require(block.timestamp <= deadline, "Campaign has ended"); // Ensure campaign is still active
+        require(msg.value > 0, "Contribution must be greater than 0"); // Ensure valid contribution amount
+
+        // If the contributor is new, add to the contributors list
+        if (contributions[msg.sender] == 0) {
+            contributors.push(msg.sender);
+        }
+
+        // Increase user contribution and total raised amount
+        contributions[msg.sender] += msg.value;
+        totalRaised += msg.value;
+
+        emit ContributionReceived(msg.sender, msg.value); // Emit contribution event
+
+        // Check if campaign goal is met
+        if (totalRaised >= goal) {
+            fundingComplete = true;
+        }
+    }
+
+    // Function for the creator to withdraw funds
+    function withdrawFunds() public {
+        require(msg.sender == creator, "Only creator can withdraw funds"); // Only creator can withdraw funds
+        require(fundingComplete, "Campaign goal not reached yet"); // Only withdraw if funding is complete
+        uint256 amount = address(this).balance; // Get contract balance
+        require(amount > 0, "No funds to withdraw"); // Ensure funds are available
+        (bool success, ) = creator.call{value: amount}(""); // Transfer funds to creator
+        require(success, "Transfer failed"); // Ensure successful transfer
+        emit FundsWithdrawn(creator, amount); // Emit withdrawal event
+    }
+
+    // Function to issue refunds if the campaign fails
+    function refund() public {
+        require(block.timestamp > deadline, "Campaign is still active"); // Campaign must have ended
+        require(totalRaised < goal, "Campaign reached the goal"); // Refunds only if goal is not met
+        require(!refunded, "Refunds have already been issued"); // Ensure refunds have not been processed
+        uint256 contribution = contributions[msg.sender]; // Get contributor's amount
+        require(contribution > 0, "No contribution to refund"); // Ensure valid refund amount
+        contributions[msg.sender] = 0; // Reset contributor's balance
+        (bool success, ) = msg.sender.call{value: contribution}(""); // Refund the contribution
+        require(success, "Refund failed"); // Ensure successful refund
+        emit RefundIssued(msg.sender, contribution); // Emit refund event
+    }
+}
